@@ -81,6 +81,7 @@ Font font_load_from_file(SDL_Renderer *renderer, const char *file_path) {
   Font font = {0};
 
   SDL_Surface *font_surface = surface_from_file(file_path);
+  scc(SDL_SetColorKey(font_surface, SDL_TRUE, 0xFF000000)); // * transparent color
 
   font.spritesheet = scp(SDL_CreateTextureFromSurface(renderer, font_surface));
 
@@ -106,7 +107,7 @@ Font font_load_from_file(SDL_Renderer *renderer, const char *file_path) {
 }
 
 void render_char(SDL_Renderer *renderer,
-                 Font *font,
+                 const Font *font,
                  char c,
                  Vec2f pos,
                  float scale)
@@ -124,6 +125,17 @@ void render_char(SDL_Renderer *renderer,
   scc(SDL_RenderCopy(renderer, font->spritesheet, &font->glyph_table[index], &dst));
 }
 
+void set_texture_color(SDL_Texture *texture, Uint32 color) {
+  // * set texture rgb color
+  SDL_SetTextureColorMod(texture,
+                         (color >> (8 * 0) & 0xFF),
+                         (color >> (8 * 1) & 0xFF),
+                         (color >> (8 * 2) & 0xFF));
+
+  // * set texture alpha color
+  scc(SDL_SetTextureAlphaMod(texture, (color >> (8 * 3) & 0xFF)));
+}
+
 void render_text_sized(SDL_Renderer *renderer,
                        Font *font,
                        const char *text,
@@ -133,15 +145,7 @@ void render_text_sized(SDL_Renderer *renderer,
                        float scale)
 {
 
-  // * set texture rgb color
-  SDL_SetTextureColorMod(font->spritesheet,
-                          (color >> (8 * 0) & 0xFF),
-                          (color >> (8 * 1) & 0xFF),
-                          (color >> (8 * 2) & 0xFF));
-
-  // * set texture alpha color
-  scc(SDL_SetTextureAlphaMod(font->spritesheet, (color >> (8 * 3) & 0xFF)));
-
+  set_texture_color(font->spritesheet, color);
   Vec2f pen = pos;
   for (size_t i = 0; i < text_size; ++i) {
     render_char(renderer, font, text[i], pen, scale);
@@ -171,16 +175,24 @@ size_t buffer_size = 0;
       ((color) >> (8 * 3)) & 0xFF
 
 // * Renders the cursor
-void render_cursor(SDL_Renderer *renderer, Uint32 color) {
+void render_cursor(SDL_Renderer *renderer, const Font* font, Uint32 color) {
+  const Vec2f pos = vec2f(buffer_cursor * FONT_CHAR_WIDTH * FONT_SCALE, 0.0f);
   const SDL_Rect rect = {
-      .x = (int)floorf(buffer_cursor * FONT_CHAR_WIDTH * FONT_SCALE),
-      .y = 0,
+      .x = (int)floorf(pos.x),
+      .y = (int)floorf(pos.y),
       .w = FONT_CHAR_WIDTH * FONT_SCALE,
       .h = FONT_CHAR_HEIGHT * FONT_SCALE};
 
-  scc(SDL_SetRenderDrawColor(renderer, UNHEX(color)));
-
+  scc(SDL_SetRenderDrawColor(renderer, UNHEX(0xFFFFFFFF)));
   scc(SDL_RenderFillRect(renderer, &rect));
+
+  // * set the font texture color to black
+  set_texture_color(font->spritesheet, 0xFF000000);
+  
+  // * Render the overlapping character on cursor rect
+  if (buffer_cursor < buffer_size) {
+    render_char(renderer, font, buffer[buffer_cursor], pos, FONT_SCALE);
+  }
 }
 
 int main(int argc, char **argv) {
@@ -217,8 +229,14 @@ int main(int argc, char **argv) {
               }
             } break;
             
-            case SDLK_PLUS: {
-
+            case SDLK_LEFT: {
+              if (buffer_cursor > 0)
+                buffer_cursor -= 1;
+            } break;
+            
+            case SDLK_RIGHT: {
+              if (buffer_cursor < buffer_size)
+                buffer_cursor += 1;
             } break;
           }
         } break;
@@ -241,7 +259,7 @@ int main(int argc, char **argv) {
     scc(SDL_RenderClear(renderer));
 
     render_text_sized(renderer, &font, buffer, buffer_size, vec2f(0.0f, 0.0f), 0xFFFFFFFF, FONT_SCALE);
-    render_cursor(renderer, 0xFFFFFFFF);
+    render_cursor(renderer, &font, 0xFFFFFFFF);
 
     SDL_RenderPresent(renderer);
   }
