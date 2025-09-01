@@ -168,6 +168,53 @@ char buffer[BUFFER_CAPACITY];
 size_t buffer_cursor = 0;
 size_t buffer_size = 0;
 
+void buffer_insert_text_before_cursor(const char *text) {
+  size_t text_size = strlen(text);
+  const size_t free_space = BUFFER_CAPACITY - buffer_size;
+  if (text_size > free_space) {
+    text_size = free_space;
+  }
+
+  // * move chunk from buffer_cursor to buffer_size 
+  size_t move_chunk_size = buffer_size - buffer_cursor;
+  // printf("move_chunk_size %zu \n", move_chunk_size);
+  // if (free_space > (move_chunk_size + text_size)) {
+  // * Buffer is full
+  // }
+
+  // * First shift the chunk by `move_chunk_size`
+  memmove(buffer + buffer_cursor + text_size,  // * destination address
+          buffer + buffer_cursor,              // * source address
+          move_chunk_size);
+
+  memcpy(buffer + buffer_cursor, text, text_size);
+  buffer_size += text_size;
+  buffer_cursor += text_size;
+}
+
+void buffer_backspace(void) {
+  if (buffer_size > 0 && buffer_cursor > 0) {
+    // * shift whole chunk to left by 1
+    memmove(buffer + buffer_cursor - 1,   // * destination address
+            buffer + buffer_cursor,       // * source address
+            buffer_size - buffer_cursor); // * chunk size
+
+    buffer_size -= 1;
+    buffer_cursor -= 1;
+  }
+}
+
+void buffer_delete(void) {
+  if (buffer_cursor < buffer_size && buffer_size > 0) {
+    // * shift whole chunk to left by 1
+    memmove(buffer + buffer_cursor,       // * destination address
+            buffer + buffer_cursor + 1,   // * source address
+            buffer_size - buffer_cursor); // * chunk size
+
+    buffer_size -= 1;
+  }
+}
+
 #define UNHEX(color)               \
   ((color) >> (8 * 0)) & 0xFF,     \
       ((color) >> (8 * 1)) & 0xFF, \
@@ -183,12 +230,12 @@ void render_cursor(SDL_Renderer *renderer, const Font* font, Uint32 color) {
       .w = FONT_CHAR_WIDTH * FONT_SCALE,
       .h = FONT_CHAR_HEIGHT * FONT_SCALE};
 
-  scc(SDL_SetRenderDrawColor(renderer, UNHEX(0xFFFFFFFF)));
+  scc(SDL_SetRenderDrawColor(renderer, UNHEX(color)));
   scc(SDL_RenderFillRect(renderer, &rect));
 
   // * set the font texture color to black
   set_texture_color(font->spritesheet, 0xFF000000);
-  
+
   // * Render the overlapping character on cursor rect
   if (buffer_cursor < buffer_size) {
     render_char(renderer, font, buffer[buffer_cursor], pos, FONT_SCALE);
@@ -223,12 +270,13 @@ int main(int argc, char **argv) {
           switch (event.key.keysym.sym) {
             // * Handle Backspace
             case SDLK_BACKSPACE: {
-              if (buffer_size > 0) {
-                buffer_size -= 1;
-                buffer_cursor = buffer_size;
-              }
+              buffer_backspace();
             } break;
             
+            case SDLK_DELETE: {
+              buffer_delete();
+            } break;
+
             case SDLK_LEFT: {
               if (buffer_cursor > 0)
                 buffer_cursor -= 1;
@@ -242,15 +290,7 @@ int main(int argc, char **argv) {
         } break;
 
         case SDL_TEXTINPUT: {
-          // printf("SDL_TEXTINPUT");
-          size_t text_size = strlen(event.text.text);
-          const size_t free_space = BUFFER_CAPACITY - buffer_size;
-          if (text_size > free_space) {
-            text_size = free_space;
-          }
-          memcpy(buffer + buffer_size, event.text.text, text_size);
-          buffer_size += text_size;
-          buffer_cursor = buffer_size;
+          buffer_insert_text_before_cursor(event.text.text);
         } break;
       }
     }
