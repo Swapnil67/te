@@ -5,6 +5,7 @@
 #include <SDL.h>
 
 #include "la.h"
+#include "buffer.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -153,67 +154,15 @@ void render_text_sized(SDL_Renderer *renderer,
   }
 }
 
-void render_text(SDL_Renderer *renderer,
-                 Font *font,
-                 const char *text,
-                 Vec2f pos,
-                 Uint32 color,
-                 float scale)
-{
-  render_text_sized(renderer, font, text, strlen(text), pos, color, scale);
-}
 
-#define BUFFER_CAPACITY 1024
-char buffer[BUFFER_CAPACITY];
-size_t buffer_cursor = 0;
-size_t buffer_size = 0;
+// #define BUFFER_CAPACITY 1024
+// char buffer[BUFFER_CAPACITY];
+// size_t buffer_cursor = 0;
+// size_t buffer_size = 0;
 
-void buffer_insert_text_before_cursor(const char *text) {
-  size_t text_size = strlen(text);
-  const size_t free_space = BUFFER_CAPACITY - buffer_size;
-  if (text_size > free_space) {
-    text_size = free_space;
-  }
+Line line = {0};
+size_t cursor = 0;
 
-  // * move chunk from buffer_cursor to buffer_size 
-  size_t move_chunk_size = buffer_size - buffer_cursor;
-  // printf("move_chunk_size %zu \n", move_chunk_size);
-  // if (free_space > (move_chunk_size + text_size)) {
-  // * Buffer is full
-  // }
-
-  // * First shift the chunk by `move_chunk_size`
-  memmove(buffer + buffer_cursor + text_size,  // * destination address
-          buffer + buffer_cursor,              // * source address
-          move_chunk_size);
-
-  memcpy(buffer + buffer_cursor, text, text_size);
-  buffer_size += text_size;
-  buffer_cursor += text_size;
-}
-
-void buffer_backspace(void) {
-  if (buffer_size > 0 && buffer_cursor > 0) {
-    // * shift whole chunk to left by 1
-    memmove(buffer + buffer_cursor - 1,   // * destination address
-            buffer + buffer_cursor,       // * source address
-            buffer_size - buffer_cursor); // * chunk size
-
-    buffer_size -= 1;
-    buffer_cursor -= 1;
-  }
-}
-
-void buffer_delete(void) {
-  if (buffer_cursor < buffer_size && buffer_size > 0) {
-    // * shift whole chunk to left by 1
-    memmove(buffer + buffer_cursor,       // * destination address
-            buffer + buffer_cursor + 1,   // * source address
-            buffer_size - buffer_cursor); // * chunk size
-
-    buffer_size -= 1;
-  }
-}
 
 #define UNHEX(color)               \
   ((color) >> (8 * 0)) & 0xFF,     \
@@ -223,7 +172,7 @@ void buffer_delete(void) {
 
 // * Renders the cursor
 void render_cursor(SDL_Renderer *renderer, const Font* font, Uint32 color) {
-  const Vec2f pos = vec2f((float)buffer_cursor * FONT_CHAR_WIDTH * FONT_SCALE, 0.0f);
+  const Vec2f pos = vec2f((float)cursor * FONT_CHAR_WIDTH * FONT_SCALE, 0.0f);
   const SDL_Rect rect = {
       .x = (int)floorf(pos.x),
       .y = (int)floorf(pos.y),
@@ -237,8 +186,8 @@ void render_cursor(SDL_Renderer *renderer, const Font* font, Uint32 color) {
   set_texture_color(font->spritesheet, 0xFF000000);
 
   // * Render the overlapping character on cursor rect
-  if (buffer_cursor < buffer_size) {
-    render_char(renderer, font, buffer[buffer_cursor], pos, FONT_SCALE);
+  if (cursor < line.size) {
+    render_char(renderer, font, line.chars[cursor], pos, FONT_SCALE);
   }
 }
 
@@ -270,27 +219,30 @@ int main(int argc, char **argv) {
           switch (event.key.keysym.sym) {
             // * Handle Backspace
             case SDLK_BACKSPACE: {
-              buffer_backspace();
+              line_backspace(&line, cursor);
+              if (cursor > 0)
+                cursor -= 1;
             } break;
             
             case SDLK_DELETE: {
-              buffer_delete();
+              line_delete(&line, cursor);
             } break;
 
             case SDLK_LEFT: {
-              if (buffer_cursor > 0)
-                buffer_cursor -= 1;
+              if (cursor > 0)
+                cursor -= 1;
             } break;
             
             case SDLK_RIGHT: {
-              if (buffer_cursor < buffer_size)
-                buffer_cursor += 1;
+              if (cursor < line.size)
+                cursor += 1;
             } break;
           }
         } break;
 
         case SDL_TEXTINPUT: {
-          buffer_insert_text_before_cursor(event.text.text);
+          line_insert_text_before(&line, event.text.text, cursor);
+          cursor += strlen(event.text.text);
         } break;
       }
     }
@@ -298,7 +250,7 @@ int main(int argc, char **argv) {
     scc(SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0));
     scc(SDL_RenderClear(renderer));
 
-    render_text_sized(renderer, &font, buffer, buffer_size, vec2f(0.0f, 0.0f), 0xFFFFFFFF, FONT_SCALE);
+    render_text_sized(renderer, &font, line.chars, line.size, vec2f(0.0f, 0.0f), 0xFFFFFFFF, FONT_SCALE);
     render_cursor(renderer, &font, 0xFFFFFFFF);
 
     SDL_RenderPresent(renderer);
