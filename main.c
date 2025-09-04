@@ -5,6 +5,7 @@
 #include <SDL.h>
 
 #include "la.h"
+#include "editor.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -148,72 +149,19 @@ void render_text_sized(SDL_Renderer *renderer,
   set_texture_color(font->spritesheet, color);
   Vec2f pen = pos;
   for (size_t i = 0; i < text_size; ++i) {
+    // printf("text[i]: %c\n", text[i]);
     render_char(renderer, font, text[i], pen, scale);
     pen.x += FONT_CHAR_WIDTH * scale;
   }
 }
 
-void render_text(SDL_Renderer *renderer,
-                 Font *font,
-                 const char *text,
-                 Vec2f pos,
-                 Uint32 color,
-                 float scale)
-{
-  render_text_sized(renderer, font, text, strlen(text), pos, color, scale);
-}
 
-#define BUFFER_CAPACITY 1024
-char buffer[BUFFER_CAPACITY];
-size_t buffer_cursor = 0;
-size_t buffer_size = 0;
+// #define BUFFER_CAPACITY 1024
+// char buffer[BUFFER_CAPACITY];
+// size_t buffer_cursor = 0;
+// size_t buffer_size = 0;
 
-void buffer_insert_text_before_cursor(const char *text) {
-  size_t text_size = strlen(text);
-  const size_t free_space = BUFFER_CAPACITY - buffer_size;
-  if (text_size > free_space) {
-    text_size = free_space;
-  }
-
-  // * move chunk from buffer_cursor to buffer_size 
-  size_t move_chunk_size = buffer_size - buffer_cursor;
-  // printf("move_chunk_size %zu \n", move_chunk_size);
-  // if (free_space > (move_chunk_size + text_size)) {
-  // * Buffer is full
-  // }
-
-  // * First shift the chunk by `move_chunk_size`
-  memmove(buffer + buffer_cursor + text_size,  // * destination address
-          buffer + buffer_cursor,              // * source address
-          move_chunk_size);
-
-  memcpy(buffer + buffer_cursor, text, text_size);
-  buffer_size += text_size;
-  buffer_cursor += text_size;
-}
-
-void buffer_backspace(void) {
-  if (buffer_size > 0 && buffer_cursor > 0) {
-    // * shift whole chunk to left by 1
-    memmove(buffer + buffer_cursor - 1,   // * destination address
-            buffer + buffer_cursor,       // * source address
-            buffer_size - buffer_cursor); // * chunk size
-
-    buffer_size -= 1;
-    buffer_cursor -= 1;
-  }
-}
-
-void buffer_delete(void) {
-  if (buffer_cursor < buffer_size && buffer_size > 0) {
-    // * shift whole chunk to left by 1
-    memmove(buffer + buffer_cursor,       // * destination address
-            buffer + buffer_cursor + 1,   // * source address
-            buffer_size - buffer_cursor); // * chunk size
-
-    buffer_size -= 1;
-  }
-}
+Editor editor = {0};
 
 #define UNHEX(color)               \
   ((color) >> (8 * 0)) & 0xFF,     \
@@ -223,7 +171,10 @@ void buffer_delete(void) {
 
 // * Renders the cursor
 void render_cursor(SDL_Renderer *renderer, const Font* font, Uint32 color) {
-  const Vec2f pos = vec2f((float)buffer_cursor * FONT_CHAR_WIDTH * FONT_SCALE, 0.0f);
+  const Vec2f pos = vec2f(
+      (float)editor.cursor_col * FONT_CHAR_WIDTH * FONT_SCALE,
+      (float)editor.cursor_row * FONT_CHAR_HEIGHT * FONT_SCALE);
+
   const SDL_Rect rect = {
       .x = (int)floorf(pos.x),
       .y = (int)floorf(pos.y),
@@ -233,12 +184,13 @@ void render_cursor(SDL_Renderer *renderer, const Font* font, Uint32 color) {
   scc(SDL_SetRenderDrawColor(renderer, UNHEX(color)));
   scc(SDL_RenderFillRect(renderer, &rect));
 
-  // * set the font texture color to black
-  set_texture_color(font->spritesheet, 0xFF000000);
-
+  
   // * Render the overlapping character on cursor rect
-  if (buffer_cursor < buffer_size) {
-    render_char(renderer, font, buffer[buffer_cursor], pos, FONT_SCALE);
+  const char *c = editor_char_under_cursor(&editor);
+  if (c) {
+    // * set the font texture color to black
+    set_texture_color(font->spritesheet, 0xFF000000);
+    render_char(renderer, font, *c, pos, FONT_SCALE);
   }
 }
 
@@ -270,35 +222,61 @@ int main(int argc, char **argv) {
           switch (event.key.keysym.sym) {
             // * Handle Backspace
             case SDLK_BACKSPACE: {
-              buffer_backspace();
+              editor_backspace(&editor);
+            } break;
+            
+            case SDLK_F2: {
+              editor_save_to_file(&editor, "output.txt");
+            } break;
+            
+            case SDLK_RETURN: {
+              editor_insert_new_line(&editor);
+            } break;
+            
+            case SDLK_UP: {
+              if (editor.cursor_row > 0) {
+                editor.cursor_row -= 1;
+              }
+            } break;
+            
+            case SDLK_DOWN: {
+              editor.cursor_row += 1;
             } break;
             
             case SDLK_DELETE: {
-              buffer_delete();
+              editor_delete(&editor);
             } break;
 
             case SDLK_LEFT: {
-              if (buffer_cursor > 0)
-                buffer_cursor -= 1;
-            } break;
-            
+              if (editor.cursor_col > 0)
+                editor.cursor_col -= 1;
+              } break;
+
             case SDLK_RIGHT: {
-              if (buffer_cursor < buffer_size)
-                buffer_cursor += 1;
+              editor.cursor_col += 1;
             } break;
           }
         } break;
 
         case SDL_TEXTINPUT: {
-          buffer_insert_text_before_cursor(event.text.text);
+          editor_insert_text_before_cursor(&editor, event.text.text);
         } break;
       }
     }
-
+    
     scc(SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0));
     scc(SDL_RenderClear(renderer));
-
-    render_text_sized(renderer, &font, buffer, buffer_size, vec2f(0.0f, 0.0f), 0xFFFFFFFF, FONT_SCALE);
+    
+    // SDL_RenderCopy(renderer, font.spritesheet, &src, &dst);
+    for (size_t row = 0; row < editor.size; ++row) {
+      const Line *line = editor.lines + row;
+      // printf("text: %s\n", line->chars);
+      render_text_sized(renderer, &font,
+                        line->chars,
+                        line->size,
+                        vec2f(0.0f, row * FONT_CHAR_HEIGHT * FONT_SCALE),
+                        0xFFFFFFFF, FONT_SCALE);
+    }
     render_cursor(renderer, &font, 0xFFFFFFFF);
 
     SDL_RenderPresent(renderer);
