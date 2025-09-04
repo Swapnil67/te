@@ -225,6 +225,10 @@ int main(int argc, char **argv) {
               editor_backspace(&editor);
             } break;
             
+            case SDLK_F2: {
+              editor_save_to_file(&editor, "output.txt");
+            } break;
+            
             case SDLK_RETURN: {
               editor_insert_new_line(&editor);
             } break;
