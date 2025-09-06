@@ -194,9 +194,25 @@ void render_cursor(SDL_Renderer *renderer, const Font* font, Uint32 color) {
   }
 }
 
+void usage(FILE *stream) {
+  fprintf(stream, "Usage: te [FILE-PATH\n");
+}
+
 int main(int argc, char **argv) {
-  (void)argc;
-  (void)argv;
+
+  // * Check if filepath was provided
+  const char *open_file_path = NULL;
+  if (argc > 1) {
+    open_file_path = argv[1];
+  }
+
+  if (open_file_path) {
+    FILE *f = fopen(open_file_path, "r");
+    if (f != NULL) {
+      editor_load_from_file(&editor, f);
+      fclose(f);
+    }
+  }
 
   scc(SDL_Init(SDL_INIT_VIDEO));
 
@@ -226,7 +242,9 @@ int main(int argc, char **argv) {
             } break;
             
             case SDLK_F2: {
-              editor_save_to_file(&editor, "output.txt");
+              if (open_file_path) {
+                editor_save_to_file(&editor, open_file_path);
+              }
             } break;
             
             case SDLK_RETURN: {
@@ -285,3 +303,8 @@ int main(int argc, char **argv) {
   SDL_Quit();
   return 0;
 }
+
+// * SV Library
+#define SV_IMPLEMENTATION
+#include "sv.h"
+
