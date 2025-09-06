@@ -1,13 +1,17 @@
 #include<stdio.h>
+#include<assert.h>
 #include<errno.h>
 #include<string.h>
-#include<assert.h>
 #include<stdlib.h>
+#include<stdbool.h>
 
+#include "sv.h"
 #include "editor.h"
 
 #define LINE_INIT_CAPACITY 1024
 #define EDITOR_INIT_CAPACITY 128
+
+static void editor_create_first_new_line(Editor *editor);
 
 static void line_grow(Line *line, size_t n) {
   size_t new_capacity = line->capacity;
@@ -30,14 +34,33 @@ static void line_grow(Line *line, size_t n) {
   }
 }
 
-void line_insert_text_before(Line *line, const char *text, size_t *col) {
+/*
+* Appends a NULL terminated text at the end of line
+*/
+void line_append_text(Line *line, const char *text) {
+  line_append_text_sized(line, text, strlen(text));
+}
 
+/*
+* Appends a sized text at the end of line
+*/
+void line_append_text_sized(Line *line, const char *text, size_t text_size) {
+  size_t col = line->size;
+  line_insert_text_sized_before(line, text, &col, text_size);
+}
+
+/**
+* * Appends sized text anywhere in the line
+*/
+void line_insert_text_sized_before(Line *line,
+                                   const char *text,
+                                   size_t *col,
+                                   size_t text_size) {
   // * Edge case (check col fits into the line)
   if (*col > line->size) {
     *col = line->size;
   }
 
-  const size_t text_size = strlen(text);
   line_grow(line, text_size);
 
   // * move chunk from buffer_cursor to buffer_size 
@@ -49,9 +72,17 @@ void line_insert_text_before(Line *line, const char *text, size_t *col) {
           move_chunk_size);
 
   memcpy(line->chars + *col, text, text_size);
-  line->size += text_size;
-  *col += text_size;
+  line->size += text_size; // * increase the line current size
+  *col += text_size;       // * increase the cursor column index
+}
 
+/** 
+* * Appends NULL terminated text anywhere in the line
+*/
+void line_insert_text_before(Line *line,
+                             const char *text,
+                             size_t *col) {
+  line_insert_text_sized_before(line, text, col, strlen(text));
 }
 
 void line_backspace(Line *line, size_t *col) {
@@ -129,29 +160,24 @@ void editor_insert_new_line(Editor *editor) {
   editor->size += 1;
 }
 
-/*
-* Push a new line into lines buffer
-*/
-void editor_push_new_line(Editor *editor) {
-  editor_grow(editor, 1);
-  // * zero initialize the new line 
-  memset(&editor->lines[editor->size], 0, sizeof(editor->lines[0]));
-  editor->size += 1;
+static void editor_create_first_new_line(Editor *editor) {
+  if (editor->cursor_row >= editor->size) {
+    if (editor->size > 0) { // * go to the last row
+      editor->cursor_row = editor->size - 1;
+    } else { // * insert new line into editor
+      editor_grow(editor, 1);
+      // * zero initialize the new line 
+      memset(&editor->lines[editor->size], 0, sizeof(editor->lines[0]));
+      editor->size += 1;
+    }
+  } 
 }
 
 /*
 * insert the text in the `lines` using `cursor_row`
 */
 void editor_insert_text_before_cursor(Editor *editor, const char *text) {
-  // * check overflow condition
-  if (editor->cursor_row >= editor->size) {
-    if (editor->size > 0) { // * go to the last row
-      editor->cursor_row = editor->size - 1;
-    } else { // * insert new line into editor
-      editor_push_new_line(editor);
-    }
-  }
-
+  editor_create_first_new_line(editor);
   line_insert_text_before(&editor->lines[editor->cursor_row], text, &editor->cursor_col);
 }
 
@@ -159,15 +185,7 @@ void editor_insert_text_before_cursor(Editor *editor, const char *text) {
 * Backspace on particular line based on cursor_row & cursor_col
 */
 void editor_backspace(Editor *editor) {
-  // * check overflow condition
-  if (editor->cursor_row >= editor->size) {
-    if (editor->size > 0) { // * go to the last row
-      editor->cursor_row = editor->size - 1;
-    } else { // * insert new line into editor
-      editor_push_new_line(editor);
-    }
-  }
-
+  editor_create_first_new_line(editor);
   line_backspace(&editor->lines[editor->cursor_row], &editor->cursor_col);
 }
 
@@ -175,15 +193,7 @@ void editor_backspace(Editor *editor) {
 * Delete on particular line based on cursor_row & cursor_col
 */
 void editor_delete(Editor *editor) {
-  // * check overflow condition
-  if (editor->cursor_row >= editor->size) {
-    if (editor->size > 0) { // * go to the last row
-      editor->cursor_row = editor->size - 1;
-    } else { // * insert new line into editor
-      editor_push_new_line(editor);
-    }
-  }
-
+  editor_create_first_new_line(editor);
   line_delete(&editor->lines[editor->cursor_row], &editor->cursor_col);
 }
 
@@ -215,3 +225,43 @@ void editor_save_to_file(const Editor *editor, const char *file_path) {
   fclose(f);
 }
 
+void editor_load_from_file(Editor *editor, const char *file_path) {
+  assert(editor->lines == NULL && "You can only load files into an empty editor");
+
+  // * Create a empty new line first
+  editor_create_first_new_line(editor);
+
+  FILE *f = fopen(file_path, "r");
+  if (f == NULL) {
+    fprintf(stderr, "ERROR: could not open file `%s`:%s\n", file_path, strerror(errno));
+    exit(1);
+  }
+
+  static char chunk[640 * 1024];
+
+  while (!feof(f)) {
+    size_t n = fread(chunk, 1, sizeof(chunk), f);
+    String_View chunk_sv = {
+      .data = chunk,
+      .count = n
+    };
+
+
+    while (chunk_sv.count > 0) {
+      Line *line = &editor->lines[editor->size - 1];
+      String_View chunk_line = {0};
+      if (sv_try_chop_by_delim(&chunk_sv, '\n', &chunk_line)) {
+        line_append_text_sized(line, chunk_line.data, chunk_line.count);
+        editor_insert_new_line(editor);
+      } else {
+        line_append_text_sized(line, chunk_sv.data, chunk_sv.count);
+        chunk_sv = SV_NULL;
+      }
+    }
+
+  }
+
+  editor->cursor_row = 0;
+
+  fclose(f);
+}

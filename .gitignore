@@ -1,4 +1,6 @@
 *.dSYM
+*.txt
+
 te
 .vscode
 TODO.md
